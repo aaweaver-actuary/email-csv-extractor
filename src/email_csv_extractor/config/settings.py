@@ -132,6 +132,22 @@ class ApplicationSettings(BaseModel):
         default=Path("/tmp/email-csv-extractor"),
         description="Temporary directory for file processing"
     )
+    data_directory: Path = Field(
+        default=Path("/app/data"),
+        description="Directory for persistent data storage"
+    )
+    
+    # Duplicate detection settings
+    enable_duplicate_detection: bool = Field(
+        default=True,
+        description="Enable duplicate row detection for overlapping log files"
+    )
+    duplicate_detection_window_minutes: int = Field(
+        default=15,
+        ge=1,
+        le=1440,  # Max 24 hours
+        description="Time window in minutes to check for duplicate rows"
+    )
     
     @field_validator('log_level')
     @classmethod
@@ -188,7 +204,10 @@ class EnvironmentConfigurationManager:
                 sharepoint=sharepoint_config,
                 filtering=filter_config,
                 log_level=os.getenv("LOG_LEVEL", "INFO"),
-                temp_directory=Path(os.getenv("TEMP_DIRECTORY", "/tmp/email-csv-extractor"))
+                temp_directory=Path(os.getenv("TEMP_DIRECTORY", "/tmp/email-csv-extractor")),
+                data_directory=Path(os.getenv("DATA_DIRECTORY", "/app/data")),
+                enable_duplicate_detection=os.getenv("ENABLE_DUPLICATE_DETECTION", "true").lower() == "true",
+                duplicate_detection_window_minutes=int(os.getenv("DUPLICATE_DETECTION_WINDOW_MINUTES", "15"))
             )
             
         except Exception as e:

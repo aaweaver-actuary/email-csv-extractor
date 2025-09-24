@@ -1,0 +1,80 @@
+version: '3.8'
+
+services:
+  email-csv-extractor:
+    build: .
+    container_name: email-csv-extractor
+    restart: unless-stopped
+    environment:
+      # Azure AD Authentication (required)
+      - AZURE_CLIENT_ID=${AZURE_CLIENT_ID}
+      - AZURE_CLIENT_SECRET=${AZURE_CLIENT_SECRET}
+      - AZURE_TENANT_ID=${AZURE_TENANT_ID}
+      
+      # Email Configuration (required)
+      - EMAIL_MAILBOX_ADDRESS=${EMAIL_MAILBOX_ADDRESS}
+      - EMAIL_POLLING_INTERVAL=${EMAIL_POLLING_INTERVAL:-300}
+      - EMAIL_MAX_MESSAGES_PER_POLL=${EMAIL_MAX_MESSAGES_PER_POLL:-50}
+      
+      # SharePoint Configuration (required)
+      - SHAREPOINT_TEAM_ID=${SHAREPOINT_TEAM_ID}
+      - SHAREPOINT_CHANNEL_ID=${SHAREPOINT_CHANNEL_ID}
+      - SHAREPOINT_TARGET_FOLDER=${SHAREPOINT_TARGET_FOLDER:-Shared Documents/CSV Files}
+      
+      # Message Filtering
+      - FILTER_SENDER_PATTERNS=${FILTER_SENDER_PATTERNS:-}
+      - FILTER_SUBJECT_PATTERNS=${FILTER_SUBJECT_PATTERNS:-}
+      - FILTER_MAX_AGE_DAYS=${FILTER_MAX_AGE_DAYS:-7}
+      
+      # Application Settings
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - TEMP_DIRECTORY=/tmp/email-csv-extractor
+      
+      # Duplicate handling
+      - ENABLE_DUPLICATE_DETECTION=${ENABLE_DUPLICATE_DETECTION:-true}
+      - DUPLICATE_DETECTION_WINDOW_MINUTES=${DUPLICATE_DETECTION_WINDOW_MINUTES:-15}
+    
+    volumes:
+      # Persist processed message cache and logs
+      - email-csv-data:/app/data
+      - email-csv-logs:/app/logs
+      # Mount .env file if it exists
+      - ${PWD}/.env:/app/.env:ro
+    
+    networks:
+      - email-csv-network
+    
+    # Resource limits
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '0.5'
+        reservations:
+          memory: 256M
+          cpus: '0.25'
+    
+    # Health check
+    healthcheck:
+      test: ["CMD", "uv", "run", "python", "-c", "import sys; sys.exit(0)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    
+    # Logging configuration
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  email-csv-data:
+    driver: local
+  email-csv-logs:
+    driver: local
+
+networks:
+  email-csv-network:
+    driver: bridge

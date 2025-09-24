@@ -8,7 +8,10 @@ Auto CSV log file ingestion from email to Microsoft Teams using Python. This sys
 - **MS Graph API Integration**: Polls mailboxes and accesses SharePoint via Microsoft Graph
 - **Intelligent Filtering**: Filter emails by sender patterns, subject patterns, and message age
 - **CSV Processing**: Automatic detection and validation of CSV attachments
+- **Duplicate Data Handling**: Smart detection and removal of overlapping log data (handles 10-minute logs with 1-minute overlap)
 - **Large File Support**: Chunked upload for files larger than 4MB
+- **Docker Containerization**: Easy deployment with automatic startup
+- **uv Package Management**: Fast dependency resolution and virtual environment management
 - **Modular Architecture**: SOLID design principles with dependency injection
 - **100% Test Coverage**: Comprehensive test suite with pytest
 - **Structured Logging**: JSON-structured logging for observability
@@ -64,16 +67,47 @@ The system follows SOLID design principles with a modular architecture:
 
 ## Installation
 
+### Option 1: Docker (Recommended)
+
+The easiest way to run the system is using Docker Compose, which handles all dependencies and provides automatic startup:
+
 ```bash
 # Clone the repository
 git clone https://github.com/aaweaver-actuary/email-csv-extractor.git
 cd email-csv-extractor
 
-# Install the package
-pip install -e .
+# Copy and configure environment variables
+cp .env.example .env
+# Edit .env with your actual Azure AD and SharePoint configuration
 
-# Or install with development dependencies
-pip install -e ".[dev]"
+# Start with Docker Compose (builds and runs automatically)
+./scripts/start.sh
+
+# Set up automatic startup when computer boots (optional)
+./scripts/setup-autostart.sh
+```
+
+### Option 2: Local Development with uv
+
+For development or if you prefer running locally:
+
+```bash
+# Install uv (fast Python package manager)
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# Clone the repository
+git clone https://github.com/aaweaver-actuary/email-csv-extractor.git
+cd email-csv-extractor
+
+# Install dependencies with uv
+uv sync
+
+# Copy and configure environment variables
+cp .env.example .env
+# Edit .env with your configuration
+
+# Run the application
+uv run email-csv-extractor run
 ```
 
 ## Configuration
@@ -107,23 +141,23 @@ FILTER_SUBJECT_PATTERNS=daily report,csv export
 ### Command Line Interface
 
 ```bash
-# Test authentication
-email-csv-extractor test-auth
+# With Docker
+docker-compose exec email-csv-extractor uv run email-csv-extractor test-auth
+docker-compose exec email-csv-extractor uv run email-csv-extractor validate-config
 
-# Test email polling
-email-csv-extractor test-email
-
-# Validate configuration
-email-csv-extractor validate-config
+# With local uv installation
+uv run email-csv-extractor test-auth
+uv run email-csv-extractor test-email
+uv run email-csv-extractor validate-config
 
 # Run once (single processing cycle)
-email-csv-extractor run --once
+uv run email-csv-extractor run --once
 
 # Run in dry-run mode (don't upload files)
-email-csv-extractor run --dry-run
+uv run email-csv-extractor run --dry-run
 
 # Continuous polling (production mode)
-email-csv-extractor run
+uv run email-csv-extractor run
 ```
 
 ### Programmatic Usage
@@ -207,6 +241,73 @@ pre-commit run --all-files
 ### Application Settings
 - `LOG_LEVEL`: Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
 - `TEMP_DIRECTORY`: Temporary directory for file processing
+- `DATA_DIRECTORY`: Directory for persistent data storage (duplicate detection cache)
+
+### Duplicate Detection
+- `ENABLE_DUPLICATE_DETECTION`: Enable/disable duplicate row detection (default: true)
+- `DUPLICATE_DETECTION_WINDOW_MINUTES`: Time window to check for duplicates (default: 15 minutes)
+
+## Duplicate Data Handling
+
+The system intelligently handles overlapping log files (e.g., 10-minute logs with 1-minute overlap):
+
+- **Row-level deduplication**: Identifies duplicate rows using content hashing
+- **Time-window based**: Configurable detection window (default 15 minutes)
+- **Smart column filtering**: Excludes timestamp columns from duplicate detection
+- **Persistent cache**: Maintains duplicate detection state across restarts
+- **Automatic cleanup**: Removes old hashes outside the detection window
+
+## Docker Management
+
+### Starting the Service
+```bash
+# Start the service
+./scripts/start.sh
+
+# View logs
+docker-compose logs -f email-csv-extractor
+
+# Check status
+docker-compose ps
+```
+
+### Automatic Startup
+Set up the service to start automatically when your computer boots:
+
+```bash
+# Set up systemd service for automatic startup
+./scripts/setup-autostart.sh
+
+# Manual systemd commands
+systemctl --user start email-csv-extractor    # Start now
+systemctl --user stop email-csv-extractor     # Stop
+systemctl --user status email-csv-extractor   # Check status
+systemctl --user disable email-csv-extractor  # Disable autostart
+```
+
+### Stopping the Service
+```bash
+# Stop the service
+./scripts/stop.sh
+
+# Or manually
+docker-compose down
+```
+
+### Managing Data
+```bash
+# View duplicate detection statistics
+docker-compose exec email-csv-extractor uv run python -c "
+from email_csv_extractor.core.duplicate_detector import DuplicateDetector
+from pathlib import Path
+import structlog
+detector = DuplicateDetector(Path('/app/data'), structlog.get_logger(), enabled=True)
+print(detector.get_statistics())
+"
+
+# Clear duplicate detection cache (if needed)
+docker-compose exec email-csv-extractor rm -rf /app/data/processed_data_hashes.json
+```
 
 ## PowerBI Integration
 

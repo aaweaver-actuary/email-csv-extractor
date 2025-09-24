@@ -9,6 +9,7 @@ from datetime import datetime
 from ..core.container import DependencyContainer
 from ..core.interfaces import Logger, EmailMessage, CsvAttachment
 from ..core.exceptions import EmailCsvExtractorError
+from ..core.duplicate_detector import DuplicateDetector
 from ..auth.ms_graph_auth import MSGraphAuthenticationProvider
 from ..email.ms_graph_poller import MSGraphEmailPoller
 from ..filtering.message_filter import EmailMessageFilter
@@ -38,13 +39,26 @@ class EmailCsvProcessor:
         self._csv_downloader = container.get_service(MSGraphCsvDownloader)
         self._sharepoint_uploader = container.get_service(MSGraphSharePointUploader)
         
-        # Setup temp directory
+        # Setup temp and data directories
         self._temp_dir = self._config_manager.settings.temp_directory
         self._temp_dir.mkdir(parents=True, exist_ok=True)
         
+        self._data_dir = self._config_manager.settings.data_directory
+        self._data_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Initialize duplicate detector
+        self._duplicate_detector = DuplicateDetector(
+            data_dir=self._data_dir,
+            logger=logger,
+            detection_window_minutes=self._config_manager.settings.duplicate_detection_window_minutes,
+            enabled=self._config_manager.settings.enable_duplicate_detection
+        )
+        
         self._logger.info(
             "Initialized email CSV processor",
-            temp_directory=str(self._temp_dir)
+            temp_directory=str(self._temp_dir),
+            data_directory=str(self._data_dir),
+            duplicate_detection_enabled=self._config_manager.settings.enable_duplicate_detection
         )
     
     async def process_emails_once(self, dry_run: bool = False) -> Dict[str, Any]:
@@ -266,6 +280,36 @@ class EmailCsvProcessor:
                 attachment, temp_file_path
             )
             stats["attachments_downloaded"] += 1
+            
+            # Read file content for duplicate detection
+            with open(downloaded_path, 'rb') as f:
+                original_content = f.read()
+            
+            # Detect and remove duplicates
+            duplicate_info = self._duplicate_detector.detect_duplicate_rows(
+                original_content, attachment.name
+            )
+            
+            # Write deduplicated content back to file
+            if duplicate_info["has_duplicates"]:
+                with open(downloaded_path, 'wb') as f:
+                    f.write(duplicate_info["processed_content"])
+                
+                self._logger.info(
+                    "Removed duplicate data from CSV",
+                    attachment_name=attachment.name,
+                    total_rows=duplicate_info["total_rows"],
+                    duplicate_rows=duplicate_info["duplicate_rows"],
+                    unique_rows=duplicate_info["unique_rows"]
+                )
+            
+            # Skip uploading if no unique data remains
+            if duplicate_info["unique_rows"] == 0:
+                self._logger.info(
+                    "Skipping upload - no unique data after deduplication",
+                    attachment_name=attachment.name
+                )
+                return
             
             self._logger.info(
                 "Downloaded CSV attachment",
