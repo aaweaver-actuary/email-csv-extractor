@@ -1,0 +1,1 @@
+"""Email polling module for monitoring mailboxes via MS Graph API."""
